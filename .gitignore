@@ -1,0 +1,9 @@
+result
+result-*
+.pi-subagents/
+
+# NOT ignored, deliberately: secrets/ipfs-cluster.env. That file is COMMITTED,
+# because sops encrypts values in place, so what lands in git is ciphertext and
+# the repo stays the single source of truth for what the box decrypts. An
+# ignored secrets/ directory is how a fleet ends up with a secret that exists on
+# one laptop.

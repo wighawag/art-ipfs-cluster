@@ -1,0 +1,73 @@
+# .sops.yaml — who can decrypt this repo's secrets.
+#
+# When you run `sops secrets/ipfs-cluster.env`, sops matches the file against a
+# `path_regex` below and encrypts its values to every recipient in that rule.
+# Keys stay in cleartext, only values are encrypted, so a diff still shows WHICH
+# secret changed and never its content.
+#
+# Two kinds of recipient:
+#   - the OPERATOR's personal age key, so secrets can be edited and rotated from
+#     a workstation. This is the same key my-boxes uses; its private half lives
+#     at ~/.config/sops/age/keys.txt and is in no repo.
+#   - the BOX's age recipient, DERIVED FROM ITS SSH HOST KEY with `ssh-to-age`,
+#     because sops-nix on the box decrypts at activation using the ed25519 host
+#     key openssh already manages. No extra key material is distributed.
+#
+# THE CIRCULARITY, AND WHY THIS REPO HAS NO CHICKEN-AND-EGG STEP. A box cannot
+# read a secret until its host key exists, its host key does not exist until it
+# boots, and it cannot finish an install whose activation decrypts a secret it
+# has no key for. The usual answer is to order it: birth bare, derive the
+# recipient, re-key, converge again.
+#
+# This repo takes my-boxes' other answer (its ADR-0008): pin-01's identity is
+# MINTED IN ADVANCE. The keypair was generated on the operator's machine, its
+# public half is committed at hosts/pin-01/ssh_host_ed25519_key.pub, its private
+# half is committed ENCRYPTED at secrets/pin-01/ssh-host-key, and
+# provision/birth.sh places the private half on the box through nixos-anywhere's
+# --extra-files BEFORE first boot. So the recipient below is already correct for
+# a box that does not exist yet, sops-nix decrypts on the very first activation,
+# and a rebirth (delete the server, birth again) re-keys nothing anywhere.
+#
+# WHAT THAT COSTS, stated plainly: the private half of the host key sits in this
+# repo, encrypted to the admin key, so whoever holds the admin key can
+# impersonate pin-01. That is accepted because the same person already holds the
+# key that decrypts everything pin-01 can read. It would not be acceptable for a
+# host whose point was to hold something the operator must not have.
+#
+# THE HOST KEY IS ENCRYPTED TO THE ADMIN KEY ONLY, deliberately: encrypting a
+# box's identity to that same box's identity is the original circularity wearing
+# a different hat.
+#
+# FORKING THIS REPO: the admin recipient below is the original operator's, and
+# you cannot decrypt what was encrypted to someone else's key. A fork REPLACES
+# both secrets rather than re-keying them: mint your own age key
+# (`age-keygen -o ~/.config/sops/age/keys.txt`), put its public half here, mint
+# a fresh host key (see provision/birth.sh's header for the three commands),
+# and recreate secrets/ipfs-cluster.env with the secret your coordinator gave
+# you.
+
+keys:
+  # The operator's personal age key (public half; safe to commit).
+  - &admin_personal age1txdjhec4tfw6vqd2yk0n6s0mr9qdyxqgmm2a46xfm5j5fr63puhqyrkm5m
+
+  # pin-01, derived from hosts/pin-01/ssh_host_ed25519_key.pub. If that key is
+  # ever rotated, this must be re-derived (`ssh-to-age -i <pub>`) and every
+  # secret re-keyed (`sops updatekeys secrets/ipfs-cluster.env`), or the box
+  # boots perfectly and cannot decrypt a thing.
+  - &host_pin_01 age1hhgzrru4nk9f23s05xgc5e5p8r0fxsef4w3nrfzfjst2ju32js9qrjmyal
+
+creation_rules:
+  # The cluster secret: read by the box at activation, edited by the operator.
+  - path_regex: secrets/ipfs-cluster\.env$
+    key_groups:
+      - age:
+          - *admin_personal
+          - *host_pin_01
+
+  # The box's own identity: ADMIN ONLY (see the header). This is the file
+  # provision/birth.sh decrypts into a tmpfs staging dir and hands to
+  # nixos-anywhere.
+  - path_regex: secrets/pin-01/ssh-host-key$
+    key_groups:
+      - age:
+          - *admin_personal
